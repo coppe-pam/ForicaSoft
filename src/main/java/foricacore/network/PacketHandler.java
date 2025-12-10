@@ -1,30 +1,49 @@
 package com.yourname.yourmod.network;
 
-import net.minecraftforge.network.NetworkRegistry;
-import net.minecraftforge.network.simple.SimpleChannel;
-import net.minecraft.resources.ResourceLocation;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.SimpleChannelInboundHandler;
 
-public class PacketHandler {
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.BiConsumer;
 
-    private static final String PROTOCOL_VERSION = "1";
+/**
+ * ForicaCore のパケット処理本体。
+ * packetId ごとに処理を登録しておけば、めちゃ軽く動く。
+ */
+public class ServerPacketHandler extends SimpleChannelInboundHandler<SimplePacket> {
 
-    public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
-            new ResourceLocation("yourmodid", "main"),
-            () -> PROTOCOL_VERSION,
-            PROTOCOL_VERSION::equals,
-            PROTOCOL_VERSION::equals
-    );
+    // packetId → 処理関数
+    private static final Map<Integer, BiConsumer<ChannelHandlerContext, SimplePacket>> handlers = new HashMap<>();
 
-    private static int packetId = 0;
-
-    public static void register() {
-        // ここでパケットを登録する
-        // 例:
-        // CHANNEL.registerMessage(id(), PacketExample.class, PacketExample::encode, PacketExample::decode, PacketExample::handle);
-
+    /**
+     * 外部（プラグイン、MOD、アドオン）からハンドラ登録可能
+     */
+    public static void register(int packetId, BiConsumer<ChannelHandlerContext, SimplePacket> handler) {
+        handlers.put(packetId, handler);
     }
 
-    private static int id() {
-        return packetId++;
+    @Override
+    protected void channelRead0(ChannelHandlerContext ctx, SimplePacket packet) {
+        int id = packet.getPacketId();
+        BiConsumer<ChannelHandlerContext, SimplePacket> handler = handlers.get(id);
+
+        if (handler != null) {
+            try {
+                handler.accept(ctx, packet);
+            } catch (Exception e) {
+                System.err.println("[ForicaCore] PacketHandler error (id=" + id + "): " + e.getMessage());
+                e.printStackTrace();
+            }
+        } else {
+            System.err.println("[ForicaCore] Unknown packetId received: " + id);
+        }
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        System.err.println("[ForicaCore] Netty error: " + cause.getMessage());
+        cause.printStackTrace();
+        ctx.close();
     }
 }
